@@ -1,4 +1,4 @@
-const ws = false;
+const ws = true;
 let socket = null;
 
 function initWS() {
@@ -11,12 +11,26 @@ function initWS() {
         const messageType = message.messageType
         if(messageType === 'chatMessage'){
             addMessageToChat(message);
+        }
+        else if (messageType === 'updateUserList') {
+            const userList = document.getElementById("users");
+            userList.innerHTML = "";
+            for (const user of message.users) {
+                let li = document.createElement("li");
+                li.appendChild(document.createTextNode(user));
+                userList.appendChild(li);
+            }
         }else{
             // send message to WebRTC
             processMessageAsWebRTC(message, messageType);
         }
     }
 }
+
+window.onbeforeunload = function() {
+    socket.onclose = function () {};
+    socket.close();
+};
 
 function deleteMessage(messageId) {
     const request = new XMLHttpRequest();
@@ -65,7 +79,8 @@ function sendChat() {
                 console.log(this.response);
             }
         }
-        const messageJSON = {"message": message};
+        xsrf_token = document.getElementById("xsrf-token").value;
+        const messageJSON = {"message": message, "xsrf_token": xsrf_token};
         request.open("POST", "/chat-messages");
         request.send(JSON.stringify(messageJSON));
     }
@@ -102,10 +117,12 @@ function welcome() {
 
     if (ws) {
         initWS();
+        socket.addEventListener('open', function () {socket.send(JSON.stringify({'messageType': 'userList'}))});
+        setInterval(() => {socket.send(JSON.stringify({'messageType': 'userList'}))}, 5000);
     } else {
         const videoElem = document.getElementsByClassName('video-chat')[0];
         videoElem.parentElement.removeChild(videoElem);
-        setInterval(updateChat, 4000);
+        setInterval(updateChat, 5000);
     }
 
     // use this line to start your video without having to click a button. Helpful for debugging

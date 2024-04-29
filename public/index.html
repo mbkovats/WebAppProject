@@ -34,13 +34,22 @@
 
 
         <div class="chat-form">
+            <input type="hidden" id="xsrf-token" value="{{xsrf_token}}">
             <hr>
             <label>
                 Chat:
                 <input id="chat-text-box" type="text">
             </label>
             <button id="chat-button" onclick="sendChat()">Send</button>
+            <form action="/upload-pic" id="pic-form" method="post" enctype="multipart/form-data">
+                <br/>
+                <label for="form-image">Upload image: </label>
+                <input id="form-image" type="file" name="upload">
+                <br/>
+                <input type="submit" value="Upload">
+            </form>
         </div>
+
 
     </div>
 
@@ -84,6 +93,9 @@
             <input type="submit" value="Post">
         </form>
 
+        <form action="/logout" method="post">
+            <button name="logout">Log Out</button>
+        </form>
 
         <form action="/profile-pic" id="image-form" method="post" enctype="multipart/form-data">
             <br/>
@@ -92,7 +104,9 @@
             <br/>
             <input type="submit" value="Post">
         </form>
-
+        User List:
+        <ul id="users">
+        </ul>
 
     </div>
 </div>

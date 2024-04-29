@@ -61,6 +61,11 @@ img.post {
     height: 30px;
 }
 
+.pic-form {
+    height: 75px;
+    float: right;
+}
+
 .user-list {
     width: 30%;
     background-color: #19A7CE;
