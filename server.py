@@ -16,6 +16,15 @@ import hashlib
 connections = []
 users = {}
 
+def recv_all(sock, length):
+    data = b''
+    while len(data) < length:
+        more = sock.recv(length - len(data))
+        if not more:
+            raise EOFError('was expecting %d bytes but only received %d bytes before the socket closed' % (length, len(data)))
+        data += more
+    return data
+
 class MyTCPHandler(socketserver.BaseRequestHandler):
 
     def handle(self):
@@ -50,7 +59,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                 fileread = fileread.replace(r"{{visits}}", str(request.cookies["visits"]))
                 random1 = random.randint(147483647, 2147483647)
                 if "auth_token" in request.cookies:
-                    myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+                    myclient = pymongo.MongoClient("mongodb://mongo:27017/")
                     db = myclient["cse312"]
                     user_collection = db["user"]
                     user = user_collection.find_one({"auth_token": hashlib.sha256(bytes(request.cookies["auth_token"], "utf-8")).hexdigest().encode("utf-8")})
@@ -62,7 +71,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             response = b"HTTP/1.1 200 OK\r\nContent-Length: " + str(size).encode("utf-8") + b"\r\nContent-Type: text/html; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n" + cookie + b"\r\n\r\n" + body
 
         elif request.path == "/register":
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             user_collection = db["user"]
             auth = extract_credentials(request)
@@ -76,7 +85,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             response = b"HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\n"
 
         elif request.path == "/login":
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             user_collection = db["user"]
             auth = extract_credentials(request)
@@ -97,7 +106,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     response = b"HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\n"
         
         elif request.path == "/logout":
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             user_collection = db["user"]
             user = user_collection.find_one({"auth_token": hashlib.sha256(bytes(request.cookies["auth_token"], "utf-8")).hexdigest().encode("utf-8")})
@@ -107,7 +116,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
         
         elif request.path == "/upload-pic":
             mp = parse_multipart(request)
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             image_collection = db["images"]
             chat_collection = db["chat"]
@@ -161,7 +170,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     response = b"HTTP/1.1 302 Found\r\nLocation: /\r\nContent-Length: 0\r\nContent-Type: text/plain; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\n"
         
         elif request.path == "/websocket":
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             chat_collection = db["chat"]
             id_collection = db["id"]
@@ -184,38 +193,31 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
             leftovers = b''
             while True:
                 received_data = b''
+                payload = b''
                 received_data += leftovers
                 leftovers = b''
                 received_data += self.request.recv(2048)
+                if len(received_data) == 0:
+                    connections.remove(self)
+                    if self in users:
+                        del users[self]
+                    break
                 multiple = []
                 parsed = parse_ws_frame(received_data)
                 buff = parsed.start
 
                 if parsed.fin_bit == 0:
-                    running = len(received_data)
                     data = received_data
-                    arr = []
-                    while parsed.fin_bit == 0:
-                        total = parsed.payload_length + buff
-                        for _ in range(0, total, min(2048, total - running)):
-                            receive_data = self.request.recv(min(2048, total - running))
-                            data += receive_data
-                            running += len(receive_data)
-                        payload = parse_ws_frame(data).payload
-                        arr.append(payload)
-                        newframe = self.request.recv(2048)
+                    while True:
+                        total = parsed.payload_length - len(data) + buff
+                        data += recv_all(self.request, total)
+                        payload += parse_ws_frame(data).payload
+                        if parsed.fin_bit == 1:
+                            break
+                        newframe = self.request.recv(20)
                         parsed = parse_ws_frame(newframe)   
                         data = newframe
                         buff = parsed.start
-                        running = len(newframe)
-                    total = parsed.payload_length + buff
-                    for _ in range(0, total, min(2048, total - running)):
-                        receive_data = self.request.recv(min(2048, total - running))
-                        data += receive_data
-                        running += len(receive_data)
-                    payload = parse_ws_frame(data).payload
-                    arr.append(payload)
-                    payload = b''.join(arr)
                     parsed.opcode = 0x1
 
                 elif len(received_data) > parsed.payload_length + buff:
@@ -235,9 +237,6 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
 
                 else:
                     payload = parsed.payload
-
-                print(connections)
-                print(payload)
 
                 if parsed.opcode == 0x8:
                     connections.remove(self)
@@ -268,14 +267,17 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                                 dict = bson(dict)
                                 frame = generate_ws_frame(dict.encode("utf-8"))
                                 for connection in connections:
-                                    connection.request.sendall(frame)
+                                    try:
+                                        connection.request.sendall(frame)
+                                    except OSError as e:
+                                        if e.errno == 9:
+                                            connections.remove(connection)
                                     
-                            if load["messageType"] == "userList":
+                            elif load["messageType"] == "userList":
                                 userslist = list(users.values())
-                                dict = {"messageType": "userList","users": userslist}
+                                dict = {"messageType": "updateUserList","users": userslist}
                                 dict = bson(dict)
                                 frame = generate_ws_frame(dict.encode("utf-8"))
-                                print(frame)
                                 self.request.sendall(frame)
 
                     else:
@@ -298,17 +300,21 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                             dict = bson(dict)
                             frame = generate_ws_frame(dict.encode("utf-8"))
                             for connection in connections:
-                                connection.request.sendall(frame)
+                                try:
+                                    connection.request.sendall(frame)
+                                except OSError as e:
+                                    if e.errno == 9:
+                                        connections.remove(connection)
 
-                        if load["messageType"] == "userList":
+                        elif load["messageType"] == "userList":
                             userslist = list(users.values())
-                            dict = {"messageType": "userList","users": userslist}
+                            dict = {"messageType": "updateUserList","users": userslist}
                             dict = bson(dict)
                             frame = generate_ws_frame(dict.encode("utf-8"))
                             self.request.sendall(frame)
         
         elif request.path[0:14] == "/chat-messages":
-            myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+            myclient = pymongo.MongoClient("mongodb://mongo:27017/")
             db = myclient["cse312"]
             chat_collection = db["chat"]    
             id_collection = db["id"]
@@ -374,7 +380,7 @@ class MyTCPHandler(socketserver.BaseRequestHandler):
                     else:
                         if chat["username"] == "Guest":
                             chat_collection.delete_one({"id": int(request.path[15:])})
-                            response = b"HTTP/1.1 200 OK\r\nContent-Length: 30\r\nContent-Type: application/json; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\nGuest user deleted message"
+                            response = b"HTTP/1.1 200 OK\r\nContent-Length: 26\r\nContent-Type: application/json; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\nGuest user deleted message"
                         else:
                             response = b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nContent-Type: application/json; charset=utf-8\r\nX-Content-Type-Options: nosniff\r\n\r\n"
                     

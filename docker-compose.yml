@@ -5,9 +5,14 @@ services:
   restart: always
   ports:
     - '27017:27017'
- app:
+ my_app:
   build: .
   environment:
     WAIT_HOSTS: mongo:27017
   ports:
     - '8080:8080'
+ nginx:
+  build: ./nginx
+  ports:
+    - '80:80'
+    - '443:443'
